@@ -32,7 +32,7 @@ spec:
       containers:
         - name: api
           # Future changes: edit this tag in a pull request
-          image: ghcr.io/kayla-marcus/patient-scheduling-api:v1.0.0
+          image: ghcr.io/kayla-marcus/patient-scheduling-api:sha-d143c2b
           ports:
             - name: http
               containerPort: 8000
