@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 
 PORT = 8000
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 MAX_BODY_BYTES = 4096
 
 # In-memory store. Demo only: data is lost on restart and is NOT shared
