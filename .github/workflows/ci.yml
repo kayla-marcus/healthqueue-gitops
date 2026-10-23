@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege by default. Only the publish job below gets write access.
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/kayla-marcus/patient-scheduling-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run unit tests
+        run: python -m unittest discover -s app -v
+
+  build:
+    # Runs on pull requests and on main. Builds and checks the image but never pushes it.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (not pushed)
+        run: docker build -t patient-scheduling-api:ci app
+      - name: Scan image for vulnerabilities
+        # Third-party action pinned to an exact commit (v0.36.0), not a movable tag.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: patient-scheduling-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true   # only fail on vulnerabilities that have a fix available
+          exit-code: "1"         # fail the build if any are found
+      - name: Smoke test the container
+        # --read-only matches readOnlyRootFilesystem in k8s/deployment.yaml
+        run: |
+          docker run -d --rm --read-only -p 8000:8000 --name api patient-scheduling-api:ci
+          for i in $(seq 1 15); do curl -fs http://localhost:8000/health && break || sleep 1; done
+          curl -fs http://localhost:8000/health
+          docker stop api
+
+  publish:
+    # Only on merge to main. Pushes the image, then scans, creates an SBOM, signs, and attests it.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # push to GHCR
+      id-token: write          # keyless signing / attestations (OIDC)
+      attestations: write      # store attestations
+      artifact-metadata: write # required by actions/attest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and push image
+        id: push
+        run: |
+          set -euo pipefail
+          TAG="sha-${GITHUB_SHA::7}"   # immutable tag that traces back to the commit
+          docker build -t "$IMAGE:$TAG" app
+          docker push "$IMAGE:$TAG" | tee push.log
+          DIGEST=$(grep -oE 'digest: sha256:[0-9a-f]{64}' push.log | cut -d' ' -f2)
+          test -n "$DIGEST"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Scan the pushed image (the exact digest we will sign)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Keep the SBOM with the run
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+
+      - name: Install cosign
+        # TODO: replace the tag with the full commit SHA from the release page.
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Sign image (keyless, signs the digest not the tag)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false   # storage records need an organization-owned repo
+
+      - name: Attest SBOM
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify signature and provenance (self-check)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cosign verify "$IMAGE@$DIGEST" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/ci.yml@${{ github.ref }}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          gh attestation verify "oci://$IMAGE@$DIGEST" --repo "${{ github.repository }}"
+          echo "Published $IMAGE:${{ steps.push.outputs.tag }} ($DIGEST)" >> "$GITHUB_STEP_SUMMARY"

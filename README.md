@@ -37,6 +37,32 @@ Any other path returns a 404 JSON error. Patients and providers are identified b
 | `k8s/service.yaml` | Stable internal address for the pods |
 | `argocd/application.yaml` | What Argo CD watches (auto-sync, self-heal, prune) |
 
+## CI pipeline
+
+`.github/workflows/ci.yml` runs on every pull request and on every merge to `main`.
+
+| Job | Runs on | What it does |
+|---|---|---|
+| `test` | Pull requests and `main` | Runs the unit tests |
+| `build` | Pull requests and `main` | Builds the image, scans it for vulnerabilities, and smoke-tests it. Never pushes. |
+| `publish` | Merges to `main` only | Pushes the image, rescans the pushed digest, generates an SBOM, signs the image, and attests provenance and the SBOM |
+
+### Why `test` and `build` are separate jobs
+
+**Why:**
+
+- **Observability.** Each job reports its own status on the pull request, so you can see at a glance whether the code or the container failed without opening a log. Each job also records its own duration, which shows where pipeline time goes and gives real timing data for lead-time analysis.
+- **Independent required checks.** Branch rules can require `test` and `build` individually, and a failure names the stage that broke.
+- **Different needs.** `test` needs only Python. `build` needs Docker.
+- **Ordering is explicit.** `build` declares `needs: test`, so a failing test stops the build.
+
+**Trade-offs we accepted:**
+
+- Each job starts a fresh runner and checks out the code again, which adds a little time to every pull request. We judged that small compared with the clarity it buys. The per-job durations in the Actions tab show the actual cost.
+- Jobs don't share files. `publish` rebuilds the image rather than reusing the one `build` scanned, so it rescans the exact digest it signs. The scan in `build` is early feedback; the scan in `publish` is the one that gates signing.
+
+`publish` is separate for a different reason: it is the only job with write permissions (packages, signing, attestations) and it never runs on pull requests.
+
 ## Prune policy trade-off
 
 `argocd/application.yaml` sets `prune: true`. Pruning means Argo CD **deletes** a cluster resource when its file is removed from `k8s/`.
