@@ -21,6 +21,7 @@ locals {
     project     = "healthqueue"
     managed_by  = "opentofu"
     environment = "local-emulator"
+    team        = "platform"
   }
 }
 
