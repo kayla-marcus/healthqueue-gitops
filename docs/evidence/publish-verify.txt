@@ -1,0 +1,11 @@
+The publish job in the CI GitHub Workflow action verifies signature and provenance after each merge:
+
+Run set -euo pipefail
+
+Verification for ghcr.io/kayla-marcus/patient-scheduling-api@sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7 --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - Existence of the claims in the transparency log was verified offline
+  - The code-signing certificate was verified using trusted certificate authority certificates
+
+[{"critical":{"identity":{"docker-reference":"ghcr.io/kayla-marcus/patient-scheduling-api@sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7"},"image":{"docker-manifest-digest":"sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7"},"type":"https://sigstore.dev/cosign/sign/v1"},"optional":{}},{"critical":{"identity":{"docker-reference":"ghcr.io/kayla-marcus/patient-scheduling-api@sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7"},"image":{"docker-manifest-digest":"sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7"},"type":"https://slsa.dev/provenance/v1"},"optional":{}},{"critical":{"identity":{"docker-reference":"ghcr.io/kayla-marcus/patient-scheduling-api@sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7"},"image":{"docker-manifest-digest":"sha256:a5d97d2d5f4efafdce4893cd2fdc1f75fbd541646c8f82ae51d9466f1cd14fb7"},"type":"https://cyclonedx.org/bom"},"optional":{}}]

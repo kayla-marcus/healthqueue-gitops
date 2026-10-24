@@ -1,0 +1,34 @@
+Trivy scans for vulnerabilities during the build job of the CI GitHub Actions Workflow:
+
+Run Trivy
+4s
+Run entrypoint.sh
+  Running Trivy with options: trivy image patient-scheduling-api:ci
+  2026-10-24T14:48:08Z	INFO	[vuln] Vulnerability scanning is enabled
+  2026-10-24T14:48:08Z	INFO	[secret] Secret scanning is enabled
+  2026-10-24T14:48:08Z	INFO	[secret] If your scanning is slow, please try '--scanners vuln' to disable secret scanning
+  2026-10-24T14:48:08Z	INFO	[secret] Please see https://trivy.dev/docs/v0.70/guide/scanner/secret#recommendation for faster secret detection
+  2026-10-24T14:48:12Z	INFO	Detected OS	family="debian" version="13.7"
+  2026-10-24T14:48:12Z	INFO	[debian] Detecting vulnerabilities...	os_version="13" pkg_num=87
+  2026-10-24T14:48:12Z	INFO	Number of language-specific files	num=1
+  2026-10-24T14:48:12Z	INFO	[python-pkg] Detecting vulnerabilities...
+  2026-10-24T14:48:12Z	WARN	Using severities from other vendors for some vulnerabilities. Read https://trivy.dev/docs/v0.70/guide/scanner/vulnerability#severity-selection for details.
+  
+  Report Summary
+  
+  ┌──────────────────────────────────────────────────────────────────────┬────────────┬─────────────────┬─────────┐
+  │                                Target                                │    Type    │ Vulnerabilities │ Secrets │
+  ├──────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+  │ patient-scheduling-api:ci (debian 13.7)                              │   debian   │        0        │    -    │
+  ├──────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+  │ usr/local/lib/python3.12/site-packages/pip-25.0.1.dist-info/METADATA │ python-pkg │        0        │    -    │
+  └──────────────────────────────────────────────────────────────────────┴────────────┴─────────────────┴─────────┘
+  Legend:
+  - '-': Not scanned
+  - '0': Clean (no security findings detected)
+  
+  
+  📣 Notices:
+    - Version 0.76.1 of Trivy is now available, current version is 0.70.0
+  
+  To suppress version checks, run Trivy scans with the --skip-version-check flag

@@ -1,0 +1,12 @@
+Only 2 replicas are running at a time; ArgoCD will return it to 2 if a different number starts running:
+
+NAME                                     READY   STATUS        RESTARTS        AGE
+patient-scheduling-api-dc87bc98c-2kdl4   0/1     Terminating   0               4s
+patient-scheduling-api-dc87bc98c-bvv5n   1/1     Running       2 (5h41m ago)   42h
+patient-scheduling-api-dc87bc98c-pfq98   0/1     Terminating   0               4s
+patient-scheduling-api-dc87bc98c-t9kkd   0/1     Terminating   0               4s
+patient-scheduling-api-dc87bc98c-z4nq9   1/1     Running       2 (5h41m ago)   42h
+patient-scheduling-api-dc87bc98c-pfq98   1/1     Terminating   0               7s
+patient-scheduling-api-dc87bc98c-2kdl4   1/1     Terminating   0               7s
+patient-scheduling-api-dc87bc98c-bvv5n   1/1     Running   2 (5h42m ago)   42h
+patient-scheduling-api-dc87bc98c-z4nq9   1/1     Running   2 (5h42m ago)   42h
