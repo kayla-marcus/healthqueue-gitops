@@ -1,0 +1,60 @@
+# CI drift drill
+
+Run: https://github.com/kayla-marcus/healthqueue-gitops/actions/runs/40125575876/job/120966162509
+Date: 10-24-2026
+
+## Detect the drift (step log)
+aws_sns_topic.alerts: Refreshing state... [id=arn:aws:sns:us-east-1:000000000000:healthqueue-alerts]
+aws_s3_bucket.supply_chain_artifacts: Refreshing state... [id=healthqueue-supply-chain-artifacts]
+aws_s3_bucket_versioning.supply_chain_artifacts: Refreshing state... [id=healthqueue-supply-chain-artifacts]
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  ~ update in-place (current -> planned)
+
+OpenTofu will perform the following actions:
+
+  # aws_s3_bucket_versioning.supply_chain_artifacts will be updated in-place
+  ~ resource "aws_s3_bucket_versioning" "supply_chain_artifacts" {
+        id     = "healthqueue-supply-chain-artifacts"
+        # (1 unchanged attribute hidden)
+
+      ~ versioning_configuration {
+          ~ status = "Suspended" -> "Enabled"
+        }
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+plan exit code: 2 (2 = drift detected)
+
+## Result summary (from the run's Summary page)
+aws_sns_topic.alerts: Refreshing state... [id=arn:aws:sns:us-east-1:000000000000:healthqueue-alerts]
+aws_s3_bucket.supply_chain_artifacts: Refreshing state... [id=healthqueue-supply-chain-artifacts]
+aws_s3_bucket_versioning.supply_chain_artifacts: Refreshing state... [id=healthqueue-supply-chain-artifacts]
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  ~ update in-place (current -> planned)
+
+OpenTofu will perform the following actions:
+
+  # aws_s3_bucket_versioning.supply_chain_artifacts will be updated in-place
+  ~ resource "aws_s3_bucket_versioning" "supply_chain_artifacts" {
+        id     = "healthqueue-supply-chain-artifacts"
+        # (1 unchanged attribute hidden)
+
+      ~ versioning_configuration {
+          ~ status = "Suspended" -> "Enabled"
+        }
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+aws_s3_bucket_versioning.supply_chain_artifacts: Modifying... [id=healthqueue-supply-chain-artifacts]
+aws_s3_bucket_versioning.supply_chain_artifacts: Modifications complete after 2s [id=healthqueue-supply-chain-artifacts]
+
+Apply complete! Resources: 0 added, 1 changed, 0 destroyed.
+
+Outputs:
+
+alerts_topic_arn = "arn:aws:sns:us-east-1:000000000000:healthqueue-alerts"
+supply_chain_artifacts_bucket = "healthqueue-supply-chain-artifacts

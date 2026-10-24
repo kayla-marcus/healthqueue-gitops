@@ -1,0 +1,19 @@
+py 
+-m unittest discover -s app -v    
+test_create_appointment (test_main.AppointmentApiTests.test_create_appointment) ... ok
+test_double_booking_same_provider_and_slot_returns_409 (test_main.AppointmentApiTests.test_double_booking_same_provider_and_slot_returns_409) ... ok
+test_get_and_list_appointment (test_main.AppointmentApiTests.test_get_and_list_appointment) ... ok
+test_health_ignores_query_string (test_main.AppointmentApiTests.test_health_ignores_query_string) ... oktest_health_returns_ok_and_version (test_main.AppointmentApiTests.test_health_returns_ok_and_version) ... ok
+test_invalid_json_returns_400 (test_main.AppointmentApiTests.test_invalid_json_returns_400) ... ok
+test_missing_fields_return_400 (test_main.AppointmentApiTests.test_missing_fields_return_400) ... ok
+test_oversized_body_returns_413 (test_main.AppointmentApiTests.test_oversized_body_returns_413) ... ok
+test_same_instant_in_other_timezone_returns_409 (test_main.AppointmentApiTests.test_same_instant_in_other_timezone_returns_409) ... ok
+test_same_slot_different_provider_is_allowed (test_main.AppointmentApiTests.test_same_slot_different_provider_is_allowed) ... ok
+test_slot_without_timezone_returns_400 (test_main.AppointmentApiTests.test_slot_without_timezone_returns_400) ... ok
+test_unknown_appointment_returns_404 (test_main.AppointmentApiTests.test_unknown_appointment_returns_404) ... ok
+test_unknown_path_returns_404_json (test_main.AppointmentApiTests.test_unknown_path_returns_404_json) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.701s
+
+OK
