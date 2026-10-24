@@ -1,134 +1,118 @@
-# HealthQueue Patient Scheduling API
+# Infrastructure (OpenTofu + LocalStack)
 
-The patient-facing appointment scheduling API for HealthQueue, a health-tech startup preparing to launch. It is a small Python service (standard library only), deployed to Kubernetes with Argo CD (GitOps).
+OpenTofu provisions two cloud resources, with remote state and state locking, against **LocalStack, a local AWS emulator**. Nothing here runs on real AWS. The emulator was chosen to avoid cloud cost and account setup; the OpenTofu code is the same shape it would be against real AWS (only the endpoints and dummy credentials differ).
 
-> **Status: pre-launch reference implementation.** Appointment data is held in memory, there is no authentication, and no real patient data should be used. See [Known limitations](#known-limitations).
-
-## API
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check. Returns `{"status":"ok","version":"1.0.0"}` |
-| POST | `/appointments` | Book an appointment. Body: `patient_id`, `provider_id`, `slot` (ISO 8601 with timezone). Returns `201` with the appointment, `400` for invalid input, `409` if the provider is already booked at that slot |
-| GET | `/appointments` | List appointments |
-| GET | `/appointments/{id}` | Get one appointment, or `404` |
-
-Any other path returns a 404 JSON error. Patients and providers are identified by opaque IDs only; the API stores no names or other personal details.
-
-## Known limitations
-
-- **In-memory storage.** Appointments are lost when a pod restarts. The Deployment runs 2 replicas and each keeps its own copy, so a booking made through one pod may not appear when a request reaches the other. A shared database is required before launch.
-- **No authentication, authorization, or TLS.**
-- **Not for real patient data.** Use synthetic IDs only.
-- **Logging.** Each request writes one JSON line (method, path, status) to stderr. It deliberately omits client IPs and query strings.
-
-## How it works
-
-1. Code and manifests live in this one repo.
-2. The image is built and pushed by hand to GitHub Container Registry (GHCR).
-3. `argocd/application.yaml` tells Argo CD to watch the `k8s/` folder on `main`.
-4. Every change to `k8s/` goes through a pull request. Argo CD applies it automatically. No `kubectl apply`, no manual Sync.
-
-| Path | Purpose |
+| Resource | Purpose |
 |---|---|
-| `app/main.py` | The API |
-| `app/Dockerfile` | Multi-stage build, non-root user, HEALTHCHECK |
-| `k8s/deployment.yaml` | What runs: image tag, replicas, probes, resources, security |
-| `k8s/service.yaml` | Stable internal address for the pods |
-| `argocd/application.yaml` | What Argo CD watches (auto-sync, self-heal, prune) |
+| `aws_s3_bucket.supply_chain_artifacts` (+ versioning) | Archive for SBOMs and scan reports |
+| `aws_sns_topic.alerts` | Destination for operational alerts (see the observability plan) |
+| State bucket `healthqueue-tofu-state` | Remote state (created in step 2, outside OpenTofu) |
 
-## CI pipeline
+## Prerequisites
 
-`.github/workflows/ci.yml` runs on every pull request and on every merge to `main`.
+- Docker Desktop running
+- OpenTofu **1.10 or newer** (`tofu version`). Install with `winget install --id=OpenTofu.Tofu -e`, or see opentofu.org.
+- Access to the `localstack/localstack:4.4.0` image. Check with `docker pull localstack/localstack:4.4.0`. No account or token is needed for this older community release.
 
-| Job | Runs on | What it does |
+## 1. Start LocalStack
+
+If an old `localstack` container exists from an earlier attempt, remove it first: `docker rm -f localstack`.
+
+```
+cd infra
+docker compose up -d
+curl.exe http://localhost:4566/_localstack/health
+```
+
+LocalStack can take 10 to 30 seconds to become ready.
+
+## 2. Create the state bucket (one-time bootstrap)
+
+OpenTofu cannot store its state in a bucket that does not exist yet, so this one bucket is created by hand.
+
+```
+docker exec localstack awslocal s3 mb s3://healthqueue-tofu-state
+docker exec localstack awslocal s3api put-bucket-versioning --bucket healthqueue-tofu-state --versioning-configuration Status=Enabled
+```
+
+## 3. Plan and apply
+
+Save the output as evidence (run from `infra/`).
+
+```
+tofu init
+tofu plan -no-color | Tee-Object ..\docs\evidence\tofu-plan.txt
+tofu apply -no-color | Tee-Object ..\docs\evidence\tofu-apply.txt
+tofu output
+```
+
+## 4. Show state locking
+
+1. In window A, run `tofu apply` and **do not answer the prompt**. The run is now holding the lock.
+2. In window B, run `tofu plan`. It should fail with "Error acquiring the state lock".
+3. In window A, type `no` to cancel. Save the error from window B as `docs/evidence/tofu-lock.txt`.
+
+## 5. Show and fix drift
+
+Change a resource outside of OpenTofu:
+
+```
+docker exec localstack awslocal s3api put-bucket-versioning --bucket healthqueue-supply-chain-artifacts --versioning-configuration Status=Suspended
+```
+
+Detect it:
+
+```
+tofu plan -no-color | Tee-Object ..\docs\evidence\tofu-drift-plan.txt
+```
+
+The plan should show versioning changing from `Suspended` back to `Enabled`. Git is the source of truth, so we resolve the drift by applying:
+
+```
+tofu apply -no-color | Tee-Object ..\docs\evidence\tofu-drift-fix.txt
+```
+
+(`tofu plan -refresh-only` records the drift in state without changing anything. Use it when the out-of-band change should be investigated before it is overwritten.)
+
+## Things to know
+
+- **The emulator is a pinned, unmaintained release.** Current LocalStack images require an account and token, so this project pins an older community tag (`4.4.0`) that needs neither. It gets no security fixes, so it runs only on your machine, bound to localhost, and is never deployed or exposed. A newer community tag (4.12 is reported to be the last one) may behave closer to real AWS; change the tag in `docker-compose.yml` if you hit a missing feature.
+- **Restarting LocalStack erases everything**, including the state bucket, unless persistence is configured. If that happens, repeat steps 2 and 3. This is an emulator limitation, not how real cloud storage behaves.
+- **If locking does not work on LocalStack** (step 4 shows no error), the emulator may not support S3 conditional writes. Fall back to a DynamoDB lock table:
+  ```
+  docker exec localstack awslocal dynamodb create-table --table-name healthqueue-tofu-locks --attribute-definitions AttributeName=LockID,AttributeType=S --key-schema AttributeName=LockID,KeyType=HASH --billing-mode PAY_PER_REQUEST
+  ```
+  Then in `backend.tf`, replace `use_lockfile = true` with `dynamodb_table = "healthqueue-tofu-locks"` and add `dynamodb = "http://localhost:4566"` to `endpoints`. Run `tofu init -reconfigure`.
+- **Dummy credentials** (`test` / `test`) are LocalStack defaults, not secrets. Real AWS credentials must never go in these files.
+- **Commit** `.terraform.lock.hcl`. **Never commit** `.terraform/` or any `*.tfstate` file (both are in `.gitignore`).
+- The commands in this README are for your own machine. Pull requests and merges also run through the pipeline below, against a separate, temporary LocalStack.
+
+## The infrastructure pipeline (GitHub Actions)
+
+| Trigger | Workflow job | What happens |
 |---|---|---|
-| `test` | Pull requests and `main` | Runs the unit tests |
-| `build` | Pull requests and `main` | Builds the image, scans it for vulnerabilities, and smoke-tests it. Never pushes. |
-| `publish` | Merges to `main` only | Pushes the image, rescans the pushed digest, generates an SBOM, signs the image, and attests provenance and the SBOM |
+| Pull request touching `infra/` | `validate` | Formatting check and `tofu validate` |
+| Pull request touching `infra/` | `plan` | Builds a baseline from the base branch, plans this PR against it, and posts the plan as a PR comment |
+| Merge to `main` | `apply` | Plans, applies the saved plan, then re-plans to confirm nothing is left to change |
+| Manual run of "Infrastructure drift drill" | `drift-drill` | Applies, changes a resource by hand, detects the drift with `plan`, reconciles with `apply` |
 
-### Why `test` and `build` are separate jobs
+**How Git stays the source of truth here**
 
-**Why:**
+- Infrastructure reaches the pipeline's environment only through a merged pull request. Direct pushes to `main` are blocked by the branch ruleset.
+- Reviewers see the plan before merging, and the merge applies the saved plan, not a fresh guess.
+- The OpenTofu binary is pinned to an exact version and verified against a checksum. Each job has the minimum permissions it needs, and only `plan` can write (PR comments).
+- The target is an emulator with dummy credentials, so the pipeline holds no cloud secrets.
 
-- **Observability.** Each job reports its own status on the pull request, so you can see at a glance whether the code or the container failed without opening a log. Each job also records its own duration, which shows where pipeline time goes and gives real timing data for lead-time analysis.
-- **Independent required checks.** Branch rules can require `test` and `build` individually, and a failure names the stage that broke.
-- **Different needs.** `test` needs only Python. `build` needs Docker.
-- **Ordering is explicit.** `build` declares `needs: test`, so a failing test stops the build.
+**What this does not guarantee**
 
-**Trade-offs we accepted:**
+- **The pipeline's environment is temporary.** Every run starts a fresh LocalStack, so "apply" proves the code builds the infrastructure from scratch; it does not update a long-lived environment. GitHub's servers cannot reach the LocalStack on your laptop (and a self-hosted runner on a public repository would be a security risk), so the laptop copy is for development and demos and can drift. The drift drill shows how drift would be caught.
+- **The PR plan needs a baseline.** Because the emulator starts empty, the `plan` job first applies the base branch so the comment shows only this PR's changes.
+- **Nothing here replaces access control on real cloud accounts.** A real target would use short-lived credentials (OIDC) for a least-privilege role, plus an approval step before apply.
+- **Required checks and path filters conflict.** These workflows run only when infrastructure files change, so they are deliberately not required status checks. A required check that never runs would block every unrelated pull request.
 
-- Each job starts a fresh runner and checks out the code again, which adds a little time to every pull request. We judged that small compared with the clarity it buys. The per-job durations in the Actions tab show the actual cost.
-- Jobs don't share files. `publish` rebuilds the image rather than reusing the one `build` scanned, so it rescans the exact digest it signs. The scan in `build` is early feedback; the scan in `publish` is the one that gates signing.
-
-`publish` is separate for a different reason: it is the only job with write permissions (packages, signing, attestations) and it never runs on pull requests.
-
-## Prune policy trade-off
-
-`argocd/application.yaml` sets `prune: true`. Pruning means Argo CD **deletes** a cluster resource when its file is removed from `k8s/`.
-
-- **Benefit:** the cluster always matches Git exactly. Nothing is left behind as an orphan.
-- **Risk:** deleting or renaming a manifest in a merged pull request deletes the live resource. For example, removing `k8s/service.yaml` removes the Service. Check any deleted or renamed files closely when reviewing a pull request.
-- **Why it's acceptable here:** the app is two small resources, and Argo CD only prunes resources it created and tracks.
-- **Default behavior:** automated sync does not prune unless you turn it on, as a safety measure. See the Argo CD docs on [Automatic Pruning](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/#automatic-pruning).
-
-## Build and push an image
+## Clean up
 
 ```
-docker build -t ghcr.io/kayla-marcus/patient-scheduling-api:v1.0.0 app
-docker login ghcr.io -u kayla-marcus      # paste your token at the prompt, in your own terminal only
-docker push ghcr.io/kayla-marcus/patient-scheduling-api:v1.0.0
+tofu destroy
+docker compose down
 ```
-
-Then make the package public in GitHub (Packages > package settings > Change visibility).
-
-## One-time Argo CD setup
-
-```
-kubectl apply -f argocd/application.yaml
-```
-
-## Verify the deployment
-
-```
-kubectl get application patient-scheduling-api -n argocd
-kubectl get pods -n healthqueue
-kubectl port-forward -n healthqueue svc/patient-scheduling-api 8080:80
-curl.exe -i http://localhost:8080/health
-```
-
-In a second PowerShell window, book and list an appointment:
-
-```
-$body = @{ patient_id = "p-1001"; provider_id = "dr-42"; slot = "2026-11-02T15:00:00Z" } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/appointments -ContentType "application/json" -Body $body
-Invoke-RestMethod -Uri http://localhost:8080/appointments
-```
-
-Booking the same provider and slot again returns `409`. Because storage is per pod, a list request may not show the booking if it reaches the other replica (see [Known limitations](#known-limitations)).
-
-## Change workflow (GitOps demo)
-
-1. Edit `app/main.py` (for example, add a field to the appointment response) and bump `VERSION`, then build and push `v1.1.0`.
-2. Create a branch, change only the image tag in `k8s/deployment.yaml`, open a pull request, and merge it.
-3. Do not click Sync and do not run `kubectl apply`. Watch: `kubectl get pods -n healthqueue -w`
-4. Prove it was automatic (Argo CD checks Git about every 3 minutes):
-
-```
-git pull
-git log -1 --oneline
-kubectl get application patient-scheduling-api -n argocd -o 'jsonpath={.status.sync.revision}'
-kubectl get application patient-scheduling-api -n argocd -o 'jsonpath={.status.operationState.operation.initiatedBy}'
-kubectl get deployment patient-scheduling-api -n healthqueue -o 'jsonpath={.spec.template.spec.containers[0].image}'
-```
-
-The revision should start with your merge commit ID, `initiatedBy` should show `{"automated":true}`, and the image should be the new tag.
-
-## Optional self-heal demo
-
-```
-kubectl scale deployment patient-scheduling-api -n healthqueue --replicas=5
-kubectl get pods -n healthqueue -w
-```
-
-Argo CD should return the Deployment to 2 replicas.

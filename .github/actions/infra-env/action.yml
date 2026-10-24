@@ -1,0 +1,35 @@
+name: Set up OpenTofu and LocalStack
+description: Installs a pinned, checksum-verified OpenTofu and optionally starts a fresh LocalStack with the state bucket.
+
+inputs:
+  with-localstack:
+    description: Start LocalStack and create the remote state bucket
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install OpenTofu (pinned version, checksum verified)
+      shell: bash
+      env:
+        TOFU_VERSION: "1.13.2"
+        TOFU_SHA256: "723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5"
+      run: |
+        set -euo pipefail
+        curl -fsSL -o /tmp/tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip"
+        echo "${TOFU_SHA256}  /tmp/tofu.zip" | sha256sum -c -
+        sudo unzip -o -q /tmp/tofu.zip tofu -d /usr/local/bin
+        tofu version
+
+    - name: Start a fresh LocalStack and create the state bucket
+      if: inputs.with-localstack == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker run -d --name localstack -p 127.0.0.1:4566:4566 localstack/localstack:4.4.0
+        for i in $(seq 1 60); do
+          curl -fs http://localhost:4566/_localstack/health > /dev/null && break || sleep 2
+        done
+        curl -fs http://localhost:4566/_localstack/health > /dev/null
+        docker exec localstack awslocal s3 mb s3://healthqueue-tofu-state
+        docker exec localstack awslocal s3api put-bucket-versioning --bucket healthqueue-tofu-state --versioning-configuration Status=Enabled
