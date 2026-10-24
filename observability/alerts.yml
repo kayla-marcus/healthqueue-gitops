@@ -1,0 +1,125 @@
+# Prometheus recording and alerting rules for the patient scheduling API.
+#
+# STATUS: designed, NOT deployed. The app does not expose /metrics yet.
+# These rules assume the app will export:
+#   http_requests_total{route, code}
+#   http_request_duration_seconds_{bucket,count}{route, le}
+# See docs/observability.md and docs/slo.md. When there is no traffic the ratios
+# are empty or NaN, so the alerts stay quiet.
+#
+# SLO: 99.9% availability (error budget 0.001) and 95% of requests under 300 ms
+# (slow-request budget 0.05), both over 30 days. Thresholds = burn rate x budget.
+groups:
+  - name: patient-scheduling-api-sli
+    rules:
+      - record: sli:http_error_ratio:rate5m
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[5m]))
+      - record: sli:http_error_ratio:rate30m
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[30m]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[30m]))
+      - record: sli:http_error_ratio:rate1h
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[1h]))
+      - record: sli:http_error_ratio:rate2h
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[2h]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[2h]))
+      - record: sli:http_error_ratio:rate6h
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[6h]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[6h]))
+      - record: sli:http_error_ratio:rate1d
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[1d]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[1d]))
+      - record: sli:http_error_ratio:rate3d
+        expr: |
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*", code=~"5.."}[3d]))
+          /
+          sum(rate(http_requests_total{job="patient-scheduling-api", route=~"/appointments.*"}[3d]))
+      - record: sli:http_slow_ratio:rate30m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="patient-scheduling-api", route=~"/appointments.*", le="0.3"}[30m]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="patient-scheduling-api", route=~"/appointments.*"}[30m]))
+          )
+      - record: sli:http_slow_ratio:rate6h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="patient-scheduling-api", route=~"/appointments.*", le="0.3"}[6h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="patient-scheduling-api", route=~"/appointments.*"}[6h]))
+          )
+
+  - name: patient-scheduling-api-alerts
+    rules:
+      # Fast burn: 14.4x over 1h uses 2% of the monthly budget. Page.
+      - alert: ErrorBudgetBurnFast
+        expr: sli:http_error_ratio:rate1h > (14.4 * 0.001) and sli:http_error_ratio:rate5m > (14.4 * 0.001)
+        labels:
+          severity: page
+        annotations:
+          summary: "Availability error budget is burning at 14.4x or more"
+          description: "5xx ratio is high enough to use 2% of the 30-day budget in an hour."
+          runbook_url: https://github.com/kayla-marcus/healthqueue-gitops/blob/main/docs/runbooks/high-error-rate.md
+
+      # Slow burn: 6x over 6h uses 5% of the monthly budget. Page.
+      - alert: ErrorBudgetBurnSlow
+        expr: sli:http_error_ratio:rate6h > (6 * 0.001) and sli:http_error_ratio:rate30m > (6 * 0.001)
+        labels:
+          severity: page
+        annotations:
+          summary: "Availability error budget is burning at 6x or more"
+          description: "5xx ratio is high enough to use 5% of the 30-day budget in six hours."
+          runbook_url: https://github.com/kayla-marcus/healthqueue-gitops/blob/main/docs/runbooks/high-error-rate.md
+
+      # Steady burn: 1x over 3d uses 10% of the monthly budget. Ticket.
+      - alert: ErrorBudgetBurnSteady
+        expr: sli:http_error_ratio:rate3d > (1 * 0.001) and sli:http_error_ratio:rate6h > (1 * 0.001)
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Availability error budget is being used as fast as it is earned"
+          description: "A low but persistent error rate will exhaust the budget by the end of the window."
+          runbook_url: https://github.com/kayla-marcus/healthqueue-gitops/blob/main/docs/runbooks/high-error-rate.md
+
+      # Latency: 6x of the 5% slow-request budget over 6h. Ticket.
+      - alert: LatencyBudgetBurn
+        expr: sli:http_slow_ratio:rate6h > (6 * 0.05) and sli:http_slow_ratio:rate30m > (6 * 0.05)
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Too many requests are slower than 300 ms"
+          description: "More than 30% of requests were slower than 300 ms, burning the latency budget at 6x."
+          runbook_url: https://github.com/kayla-marcus/healthqueue-gitops/blob/main/docs/runbooks/high-latency.md
+
+      # Uses kube-state-metrics.
+      - alert: NoReplicasAvailable
+        expr: kube_deployment_status_replicas_available{namespace="healthqueue", deployment="patient-scheduling-api"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "No patient-scheduling-api pods are available"
+          description: "Patients cannot book appointments."
+          runbook_url: https://github.com/kayla-marcus/healthqueue-gitops/blob/main/docs/runbooks/service-down.md
+
+      - alert: PodRestartingRepeatedly
+        expr: increase(kube_pod_container_status_restarts_total{namespace="healthqueue", container="api"}[15m]) > 3
+        labels:
+          severity: ticket
+        annotations:
+          summary: "A patient-scheduling-api container restarted more than 3 times in 15 minutes"
+          description: "Restarts also lose any bookings held in that pod's memory."
+          runbook_url: https://github.com/kayla-marcus/healthqueue-gitops/blob/main/docs/runbooks/service-down.md
