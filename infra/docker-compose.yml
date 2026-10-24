@@ -1,0 +1,10 @@
+# Local AWS emulator (LocalStack Community), pinned to an older release.
+# The current LocalStack images require an account and auth token (since March 2026).
+# This older community tag does not. It no longer receives updates, so use it only
+# on your own machine. The port is bound to localhost so nothing else can reach it.
+services:
+  localstack:
+    image: localstack/localstack:4.4.0
+    container_name: localstack
+    ports:
+      - "127.0.0.1:4566:4566"
