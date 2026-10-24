@@ -1,0 +1,139 @@
+name: Infrastructure
+
+# Runs only when infrastructure files change.
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+      - ".github/actions/infra-env/**"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+      - ".github/actions/infra-env/**"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  validate:
+    # Fast checks that need no emulator.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/infra-env
+        with:
+          with-localstack: "false"
+      - name: Check formatting
+        working-directory: infra
+        run: tofu fmt -check -recursive -diff
+      - name: Validate configuration
+        working-directory: infra
+        run: |
+          tofu init -backend=false
+          tofu validate
+
+  plan:
+    # Pull requests: show reviewers exactly what would change.
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # post the plan as a comment
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out the base branch (the baseline)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+          persist-credentials: false
+      - uses: ./.github/actions/infra-env
+
+      - name: Build the baseline from the base branch
+        # The emulator starts empty on every run, so first apply what is already on the
+        # base branch. The plan below then shows only what this pull request changes.
+        run: |
+          if [ -d base/infra ]; then
+            cd base/infra
+            tofu init
+            tofu apply -auto-approve -no-color
+          else
+            echo "No infra/ on the base branch; planning from an empty state."
+          fi
+
+      - name: Plan this pull request
+        working-directory: infra
+        run: |
+          tofu init
+          tofu plan -no-color -out=tfplan | tee ../plan.txt
+
+      - name: Post the plan on the pull request
+        # Fork pull requests get a read-only token, so only comment on same-repo PRs.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          {
+            echo "### OpenTofu plan"
+            echo "Emulator: LocalStack (fresh each run). Baseline: \`$BASE_REF\`."
+            echo
+            echo '```'
+            head -c 60000 plan.txt
+            echo
+            echo '```'
+          } > comment.md
+          gh pr comment "$PR_NUMBER" --body-file comment.md --edit-last --create-if-none
+
+  apply:
+    # Merges to main: build the environment from Git and prove it applies cleanly.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/infra-env
+
+      - name: Plan
+        working-directory: infra
+        run: |
+          tofu init
+          tofu plan -no-color -out=tfplan | tee ../plan.txt
+
+      - name: Apply the saved plan
+        # Applying the saved plan guarantees we apply exactly what was planned.
+        working-directory: infra
+        run: tofu apply -no-color tfplan | tee ../apply.txt
+
+      - name: Confirm nothing is left to change
+        # Exit code 2 would mean the applied state still differs from the code.
+        working-directory: infra
+        run: tofu plan -no-color -detailed-exitcode
+
+      - name: Record the result
+        run: |
+          {
+            echo "### OpenTofu apply (fresh LocalStack, built from commit ${GITHUB_SHA::7})"
+            echo '```'
+            cat apply.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

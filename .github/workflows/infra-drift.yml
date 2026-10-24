@@ -1,0 +1,67 @@
+name: Infrastructure drift drill
+
+# Manual only. Every run starts a fresh emulator, so a schedule would never find
+# drift. This drill proves the detect-and-reconcile process works end to end.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  drift-drill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/infra-env
+
+      - name: Apply the committed configuration
+        working-directory: infra
+        run: |
+          tofu init
+          tofu apply -auto-approve -no-color
+
+      - name: Confirm there is no drift yet
+        working-directory: infra
+        run: tofu plan -no-color -detailed-exitcode
+
+      - name: Change a resource outside of OpenTofu (simulated manual change)
+        run: docker exec localstack awslocal s3api put-bucket-versioning --bucket healthqueue-supply-chain-artifacts --versioning-configuration Status=Suspended
+
+      - name: Detect the drift
+        working-directory: infra
+        run: |
+          set +e
+          tofu plan -no-color -detailed-exitcode | tee ../drift-plan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "plan exit code: $code (2 = drift detected)"
+          test "$code" -eq 2
+
+      - name: Reconcile back to what Git says
+        working-directory: infra
+        run: tofu apply -auto-approve -no-color
+
+      - name: Confirm the drift is gone
+        working-directory: infra
+        run: tofu plan -no-color -detailed-exitcode
+
+      - name: Record the result
+        run: |
+          {
+            echo "### Drift drill"
+            echo "Drift was introduced by hand, detected by plan, and removed by apply."
+            echo '```'
+            cat drift-plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

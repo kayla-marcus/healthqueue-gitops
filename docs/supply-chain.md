@@ -45,6 +45,7 @@ These are deliberate scope decisions or open items, not hidden problems.
 6. **No required reviewers.** A single maintainer can merge their own pull requests.
 7. **Scan scope is limited.** Fixable HIGH and CRITICAL findings only, and only the container's operating system and installed packages. Application code is not analyzed for flaws.
 8. **Public transparency log.** Keyless signing records the repository identity in Sigstore's public log. That is expected for a public repository.
+9. **Infrastructure pipeline tooling.** The OpenTofu binary is pinned and checksum-verified. The LocalStack image is pinned by tag, not digest, and is an unmaintained release that runs only inside a temporary CI job or on a developer machine. The pipeline targets an emulator with dummy credentials. A real cloud target would need OIDC short-lived credentials, a least-privilege role, and an approval step.
 
 ## Why third-party actions are pinned by commit
 
