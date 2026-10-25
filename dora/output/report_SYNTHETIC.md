@@ -21,7 +21,7 @@ A reproducible demonstration of how the four DORA metrics are calculated and com
 
 ## DORA benchmarks used
 
-Source: DORA, *Accelerate State of DevOps Report 2024*, "Performance levels" (v2024.3), the most recent four-level table. Check these values against the report on dora.dev before citing them.
+Source: DORA, *Accelerate State of DevOps Report 2024*, "Performance levels" (v2024.3), the most recent four-level table.
 
 | Level | Lead time | Deployment frequency | Change failure rate (typical) | Failed deployment recovery |
 |---|---|---|---|---|
