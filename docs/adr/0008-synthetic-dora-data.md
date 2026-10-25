@@ -22,7 +22,7 @@ DORA metrics (deployment frequency, lead time, change failure rate, and failed d
 
 - **The results follow from invented assumptions.** They say nothing about real performance and must never be quoted as if they did. The report and this record both say so.
 - Small numbers of failures make the failure rate and recovery results fragile, and the report flags this.
-- Benchmarks come from DORA's 2024 report, which should be checked against dora.dev before citing.
+- Benchmarks come from DORA's 2024 report.
 
 ## Next step
 
